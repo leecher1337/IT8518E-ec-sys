@@ -1,14 +1,17 @@
-# x2100-ec-sys
+# IT8518E-ec-sys
+
+Kernel module for communicating with the ITE IT8518E Emebdded controller.
+Experimental, currently untested.
 
 ```
-dkms add -m x2100-ec-sys/1.0
-dkms build -m x2100-ec-sys/1.0
-dkms install -m x2100-ec-sys/1.0
+dkms add -m IT8518E-ec-sys/1.0
+dkms build -m IT8518E-ec-sys/1.0
+dkms install -m IT8518E-ec-sys/1.0
 ```
 
 Write support:
 
 ```
-modprobe -r x2100_ec_sys
-modprobe x2100_ec_sys write_support=1
+modprobe -r IT8518E_ec_sys
+modprobe IT8518E_ec_sys write_support=1
 ```

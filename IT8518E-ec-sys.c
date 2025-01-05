@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * x2100_ec_sys.c
+ * IT8518E_ec_sys.c
  *
  * Author:
+ *      leecher1337
  *      vladisslav2011
  *      exander77 <exander77@pm.me>
  */
@@ -15,8 +16,8 @@
 #include <linux/delay.h>
 #include "internal.h"
 
-MODULE_AUTHOR("exander77");
-MODULE_DESCRIPTION("51nb X210/X2100 EC module");
+MODULE_AUTHOR("leecher1337");
+MODULE_DESCRIPTION("IT8518E EC module");
 MODULE_LICENSE("GPL");
 MODULE_VERSION("0.01");
 
@@ -229,6 +230,30 @@ int ec_flush(struct acpi_ec *ec)
 	return -ETIME;
 }
 
+int ec_oem_write(struct acpi_ec *ec, u8 cmd, u8 val)
+{
+	int err = 0;
+	u8 stat;
+
+	if (!err) err = ec_wr_cmd (ec, 0x81, &stat);
+	if (!err) err = ec_wr_data(ec, cmd, &stat);
+	if (!err) err = ec_wr_data(ec, val, &stat);
+
+	return err;
+}
+
+int ec_oem_read(struct acpi_ec *ec, u8 cmd, u8 *val)
+{
+	int err = 0;
+	u8 stat;
+
+	if (!err) err = ec_wr_cmd (ec, 0x80, &stat);
+	if (!err) err = ec_wr_data(ec, cmd, &stat);
+	if (!err) err = ec_rd_data(ec, val, &stat);
+
+	return err;
+}
+
 int ec_get_sci(struct acpi_ec *ec)
 {
 	u8 s=0;
@@ -262,11 +287,8 @@ int ec_get_sci(struct acpi_ec *ec)
 int ec_read_gpio(u32 addr, u8 *val)
 {
 	int err=0;
-	u8 ob;
 	u8 stat,d;
 	struct acpi_ec *ec=first_ec;
-	
-	ob=(addr)&0xff;
 	
 
 	mutex_lock(&ec->mutex);
@@ -278,14 +300,15 @@ int ec_read_gpio(u32 addr, u8 *val)
 	if(!err)
 		err=ec_flush(ec);
 	
-	
+	if (!err)
+		err=ec_oem_write(ec, 0x92, (u8)addr);
+	d = 0x88;
 	if(!err)
-		err=ec_wr_cmd(ec,0xba,&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob,&stat);
-	if(!err)
-		err=ec_rd_data(ec,val,&stat);
-	
+		err=ec_oem_write(ec, 0x90, d);
+	while (!err && (d & 0x80))
+		err=ec_oem_read(ec, 0x90, &d);
+	if (!err)
+		err=ec_oem_read(ec, 0x94, val);
 	
 //	printk("s=%02x\n",stat);
 	if(!err)
@@ -298,52 +321,14 @@ int ec_read_gpio(u32 addr, u8 *val)
 
 int ec_write_gpio(u32 addr, u8 val)
 {
-	int err=0;
-	u8 ob;
-	u8 stat,d;
-	struct acpi_ec *ec=first_ec;
-	
-	ob=(addr)&0xff;
-	if (!write_support)
-		return -EINVAL;
-	
-
-	mutex_lock(&ec->mutex);
-	if(!err)
-		err=ec_wr_cmd(ec,0x82,&stat);
-	if(!err)
-		err=ec_rd_data(ec,&d,&stat);
-//	printk("v=%02x\n",d);
-	if(!err)
-		err=ec_flush(ec);
-	
-	
-	if(!err)
-		err=ec_wr_cmd(ec,0xb9,&stat);
-	if(!err)
-		err=ec_wr_data(ec,val,&stat);
-	
-	
-//	printk("s=%02x\n",stat);
-	if(!err)
-		err=ec_wr_cmd(ec,0x83,&stat);
-	
-	mutex_unlock(&ec->mutex);
-	
-	return err;
+	return -EINVAL;
 }
 
 int ec_read_ram(u32 addr, u8 *val)
 {
 	int err=0;
-	u8 ob[4];
 	u8 stat,d;
 	struct acpi_ec *ec=first_ec;
-	
-	ob[0]=(addr >>16)&0xff;
-	ob[1]=(addr >>8)&0xff;
-	ob[2]=(addr)&0xff;
-	ob[3]=0;
 	
 
 	mutex_lock(&ec->mutex);
@@ -358,16 +343,17 @@ int ec_read_ram(u32 addr, u8 *val)
 		err=ec_flush(ec);
 	
 	
+	if (!err)
+		err=ec_oem_write(ec, 0x92, (u8)(addr >>8)&0xff);
+	if (!err)
+		err=ec_oem_write(ec, 0x93, (u8)(addr)&0xff);
+	d = 0x81;
 	if(!err)
-		err=ec_wr_cmd(ec,0xbf,&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[0],&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[1],&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[2],&stat);
-	if(!err)
-		err=ec_rd_data(ec,val,&stat);
+		err=ec_oem_write(ec, 0x90, d);
+	while (!err && (d & 0x80))
+		err=ec_oem_read(ec, 0x90, &d);
+	if (!err)
+		err=ec_oem_read(ec, 0x94, val);
 	
 	
 //	printk("s=%02x\n",stat);
@@ -382,7 +368,6 @@ int ec_read_ram(u32 addr, u8 *val)
 static int ec_write_ram(u32 addr, u8 val)
 {
 	int err=0;
-	u8 ob[4];
 	u8 stat,d;
 	struct acpi_ec *ec=first_ec;
 	if (!write_support)
@@ -390,11 +375,6 @@ static int ec_write_ram(u32 addr, u8 val)
 
 	mutex_lock(&ec->mutex);
 
-	ob[0]=(addr >>16)&0xff;
-	ob[1]=(addr >>8)&0xff;
-	ob[2]=(addr)&0xff;
-	ob[3]=val;
-	
 	if(!err)
 		err=ec_wr_cmd(ec,0x82,&stat);
 	if(!err)
@@ -404,16 +384,17 @@ static int ec_write_ram(u32 addr, u8 val)
 		err=ec_flush(ec);
 	
 	
+	if (!err)
+		err=ec_oem_write(ec, 0x92, (u8)(addr >>8)&0xff);
+	if (!err)
+		err=ec_oem_write(ec, 0x93, (u8)(addr)&0xff);
+	if (!err)
+		err=ec_oem_write(ec, 0x94, val);
+	d = 0x83;
 	if(!err)
-		err=ec_wr_cmd(ec,0xbe,&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[0],&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[1],&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[2],&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[3],&stat);
+		err=ec_oem_write(ec, 0x90, d);
+	while (!err && (d & 0x80))
+		err=ec_oem_read(ec, 0x90, &d);
 	
 	
 //	printk("s=%02x\n",stat);
@@ -430,15 +411,10 @@ static int ec_write_ram(u32 addr, u8 val)
 int ec_read_ram_word(u32 addr, u8 *val)
 {
 	int err=0;
-	u8 ob[4];
 	u8 stat,d;
 	struct acpi_ec *ec=first_ec;
 	if(addr&1)
 		return -EINVAL;
-	ob[0]=(addr >>16)&0xff;
-	ob[1]=(addr >>8)&0xff;
-	ob[2]=(addr)&0xff;
-	ob[3]=0;
 	
 
 	mutex_lock(&ec->mutex);
@@ -453,32 +429,20 @@ int ec_read_ram_word(u32 addr, u8 *val)
 		err=ec_flush(ec);
 	
 	
+	if (!err)
+		err=ec_oem_write(ec, 0x92, (u8)(addr >>8)&0xff);
+	if (!err)
+		err=ec_oem_write(ec, 0x93, (u8)(addr)&0xff);
+	d = 0x82;
 	if(!err)
-		err=ec_wr_cmd(ec,0xb8,&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[0],&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[1],&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[2],&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[3],&stat);
-	if(!err)
-		err=ec_rd_data(ec,val,&stat);
+		err=ec_oem_write(ec, 0x90, d);
+	while (!err && (d & 0x80))
+		err=ec_oem_read(ec, 0x90, &d);
+	if (!err)
+		err=ec_oem_read(ec, 0x94, val);
+	if (!err)
+		err=ec_oem_read(ec, 0x95, &val[1]);
 	
-	ob[3]=2;
-	if(!err)
-		err=ec_wr_cmd(ec,0xb8,&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[0],&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[1],&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[2],&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[3],&stat);
-	if(!err)
-		err=ec_rd_data(ec,&val[1],&stat);
 	
 //	printk("s=%02x\n",stat);
 	if(!err)
@@ -492,7 +456,6 @@ int ec_read_ram_word(u32 addr, u8 *val)
 static int ec_write_ram_word(u32 addr, u16 val)
 {
 	int err=0;
-	u8 ob[5];
 	u8 stat,d;
 	struct acpi_ec *ec=first_ec;
 	if (!write_support)
@@ -502,12 +465,6 @@ static int ec_write_ram_word(u32 addr, u16 val)
 
 	mutex_lock(&ec->mutex);
 
-	ob[0]=(addr >>16)&0xff;
-	ob[1]=(addr >>8)&0xff;
-	ob[2]=(addr)&0xff;
-	ob[3]=val&0xff;
-	ob[4]=val>>8;
-	
 	if(!err)
 		err=ec_wr_cmd(ec,0x82,&stat);
 	if(!err)
@@ -517,18 +474,19 @@ static int ec_write_ram_word(u32 addr, u16 val)
 		err=ec_flush(ec);
 	
 	
+	if (!err)
+		err=ec_oem_write(ec, 0x92, (u8)(addr >>8)&0xff);
+	if (!err)
+		err=ec_oem_write(ec, 0x93, (u8)(addr)&0xff);
+	if (!err)
+		err=ec_oem_write(ec, 0x94, (u8)(val >>8)&0xff);
+	if (!err)
+		err=ec_oem_write(ec, 0x95, (u8)(val)&0xff);
+	d = 0x84;
 	if(!err)
-		err=ec_wr_cmd(ec,0xb7,&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[0],&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[1],&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[2],&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[3],&stat);
-	if(!err)
-		err=ec_wr_data(ec,ob[4],&stat);
+		err=ec_oem_write(ec, 0x90, d);
+	while (!err && (d & 0x80))
+		err=ec_oem_read(ec, 0x90, &d);
 	
 	
 //	printk("s=%02x\n",stat);
@@ -815,40 +773,6 @@ static ssize_t acpi_ec_read_einval(struct file *f, char __user *buf,
 	return -EINVAL;
 }
 
-static ssize_t acpi_ec_write_fan_timer(struct file *f, const char __user *buf,
-					size_t count, loff_t *off)
-{
-	if (count < 1 || *off > 0)
-		return 0;
-	
-	uint8_t val;
-	if (get_user(val, buf))
-		return -EFAULT;
-	
-	int err=0;
-	u8 stat;
-	struct acpi_ec *ec=first_ec;
-
-	if (!write_support)
-		return -EINVAL;
-	
-	mutex_lock(&ec->mutex);
-	if (!err) err = ec_wr_cmd (ec, 0x81, &stat);
-	if (!err) err = ec_wr_data(ec, 0x52, &stat);
-	if (!err) err = ec_wr_data(ec, val, &stat);
-	mutex_unlock(&ec->mutex);
-	
-	return err < 0 ? err : 1;
-}
-
-static const struct file_operations acpi_ec_fan_timer_ops = {
-	.owner = THIS_MODULE,
-	.open  = simple_open,
-	.read  = acpi_ec_read_einval,
-	.write = acpi_ec_write_fan_timer,
-	.llseek = default_llseek,
-};
-
 static ssize_t acpi_ec_write_fan_speed(struct file *f, const char __user *buf,
 					size_t count, loff_t *off)
 {
@@ -867,9 +791,7 @@ static ssize_t acpi_ec_write_fan_speed(struct file *f, const char __user *buf,
 		return -EINVAL;
 	
 	mutex_lock(&ec->mutex);
-	if (!err) err = ec_wr_cmd (ec, 0x81, &stat);
-	if (!err) err = ec_wr_data(ec, 0x51, &stat);
-	if (!err) err = ec_wr_data(ec, val, &stat);
+	ec_oem_write(ec, 0x2F, val);
 	mutex_unlock(&ec->mutex);
 	
 	return err < 0 ? err : 1;
@@ -882,41 +804,6 @@ static const struct file_operations acpi_ec_fan_speed_ops = {
 	.write = acpi_ec_write_fan_speed,
 	.llseek = default_llseek,
 };
-
-static ssize_t acpi_ec_write_xop(struct file *f, const char __user *buf,
-					size_t count, loff_t *off)
-{
-	if (count < 1 || *off > 0)
-		return 0;
-	
-	uint8_t val;
-	if (get_user(val, buf))
-		return -EFAULT;
-	
-	int err=0;
-	u8 stat;
-	struct acpi_ec *ec=first_ec;
-
-	if (!write_support)
-		return -EINVAL;
-	
-	mutex_lock(&ec->mutex);
-	if (!err) err = ec_wr_cmd (ec, 0x81, &stat);
-	if (!err) err = ec_wr_data(ec, 0xFC, &stat);
-	if (!err) err = ec_wr_data(ec, val, &stat);
-	mutex_unlock(&ec->mutex);
-	
-	return err < 0 ? err : 1;
-}
-
-static const struct file_operations acpi_ec_xop_ops = {
-	.owner = THIS_MODULE,
-	.open  = simple_open,
-	.read  = acpi_ec_read_einval,
-	.write = acpi_ec_write_xop,
-	.llseek = default_llseek,
-};
-
 
 static void acpi_ec_add_debugfs(struct acpi_ec *ec, unsigned int ec_device_count)
 {
@@ -941,9 +828,7 @@ static void acpi_ec_add_debugfs(struct acpi_ec *ec, unsigned int ec_device_count
 	debugfs_create_file_size("ram", mode, dev_dir, ec, &acpi_ec_ram_ops,EC_RAM_SIZE);
 	debugfs_create_file_size("gpio", mode, dev_dir, ec, &acpi_ec_gpio_ops,EC_GPIO_SIZE);
 	mode = 0200;
-	debugfs_create_file_size("fan_timer", mode, dev_dir, ec, &acpi_ec_fan_timer_ops,1);
-	debugfs_create_file_size("fan_speed", mode, dev_dir, ec, &acpi_ec_fan_speed_ops,1);
-	debugfs_create_file_size("xop", mode, dev_dir, ec, &acpi_ec_xop_ops,1);
+	// debugfs_create_file_size("fan_speed", mode, dev_dir, ec, &acpi_ec_fan_speed_ops,1);
 }
 
 static int __init acpi_ec_sys_init(void)

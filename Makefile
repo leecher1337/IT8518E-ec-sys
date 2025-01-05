@@ -1,4 +1,4 @@
-obj-m += x2100-ec-sys.o
+obj-m += IT8518E-ec-sys.o
 KERNEL_DIR = /lib/modules/$(shell uname -r)/build
 
 all:
