@@ -335,7 +335,7 @@ int ec_read_ram(u32 addr, u8 *val)
 
 	
 	if(!err)
-		err=ec_wr_cmd(ec,0x82,&stat);
+		err=ec_wr_cmd(ec,0x8E,&stat);
 	if(!err)
 		err=ec_rd_data(ec,&d,&stat);
 //	printk("v=%02x\n",d);
@@ -359,6 +359,31 @@ int ec_read_ram(u32 addr, u8 *val)
 //	printk("s=%02x\n",stat);
 	if(!err)
 		err=ec_wr_cmd(ec,0x83,&stat);
+	
+	mutex_unlock(&ec->mutex);
+	
+	return err;
+}
+
+int ec_read_intmem(u8 addr, u8 *val)
+{
+	int err=0;
+	u8 stat;
+	struct acpi_ec *ec=first_ec;
+	
+
+	mutex_lock(&ec->mutex);
+
+	
+	if(!err)
+		err=ec_wr_cmd(ec,0x8E,&stat);
+	if(!err)
+		err=ec_wr_data(ec,addr, &stat);
+	if(!err)
+		err=ec_wr_data(ec,0x20, &stat);
+	if(!err)
+		err=ec_rd_data(ec,val,&stat);
+//	printk("v=%02x\n",val);
 	
 	mutex_unlock(&ec->mutex);
 	
@@ -773,6 +798,61 @@ static ssize_t acpi_ec_read_einval(struct file *f, char __user *buf,
 	return -EINVAL;
 }
 
+#define EC_INTMEM_SIZE 256
+
+static ssize_t acpi_ec_read_intmem(struct file *f, char __user *buf,
+			       size_t count, loff_t *off)
+{
+	/* Use this if support reading/writing multiple ECs exists in ec.c:
+	 * struct acpi_ec *ec = ((struct seq_file *)f->private_data)->private;
+	 */
+	unsigned int size = EC_INTMEM_SIZE;
+	loff_t init_off = *off;
+	int err = 0;
+	u8 byte_read;
+
+	if (*off >= size)
+		return 0;
+	if (*off + count >= size) {
+		size -= *off;
+		count = size;
+	} else
+		size = count;
+	while (size) {
+		err = ec_read_intmem(*off, &byte_read);
+		if (err)
+			return err;
+		if (put_user(byte_read, buf + *off - init_off)) {
+			if (*off - init_off)
+				return *off - init_off; /* partial read */
+			return -EFAULT;
+		}
+		*off += 1;
+		size--;
+	}
+	
+	return count;
+}
+
+static ssize_t acpi_ec_write_intmem(struct file *f, const char __user *buf,
+				size_t count, loff_t *off)
+{
+	/* Use this if support reading/writing multiple ECs exists in ec.c:
+	 * struct acpi_ec *ec = ((struct seq_file *)f->private_data)->private;
+	 */
+
+	return -EINVAL;
+
+}
+
+static const struct file_operations acpi_ec_intmem_ops = {
+	.owner = THIS_MODULE,
+	.open  = simple_open,
+	.read  = acpi_ec_read_intmem,
+	.write = acpi_ec_write_intmem,
+	.llseek = default_llseek,
+};
+
 static ssize_t acpi_ec_write_fan_speed(struct file *f, const char __user *buf,
 					size_t count, loff_t *off)
 {
@@ -826,6 +906,7 @@ static void acpi_ec_add_debugfs(struct acpi_ec *ec, unsigned int ec_device_count
 	debugfs_create_file_size("io", mode, dev_dir, ec, &acpi_ec_io_ops,EC_SPACE_SIZE);
 	debugfs_create_file("sci", mode, dev_dir, ec, &acpi_ec_sci_ops);
 	debugfs_create_file_size("ram", mode, dev_dir, ec, &acpi_ec_ram_ops,EC_RAM_SIZE);
+	debugfs_create_file_size("intmem", mode, dev_dir, ec, &acpi_ec_intmem_ops,EC_INTMEM_SIZE);
 	debugfs_create_file_size("gpio", mode, dev_dir, ec, &acpi_ec_gpio_ops,EC_GPIO_SIZE);
 	mode = 0200;
 	// debugfs_create_file_size("fan_speed", mode, dev_dir, ec, &acpi_ec_fan_speed_ops,1);
