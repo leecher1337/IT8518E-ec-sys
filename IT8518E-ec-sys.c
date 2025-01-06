@@ -279,7 +279,7 @@ int ec_get_sci(struct acpi_ec *ec)
 }
 
 
-#define EC_RAM_SIZE 0x01000000
+#define EC_RAM_SIZE 0x010000
 #define EC_GPIO_SIZE 0x0100
 
 
